@@ -1,0 +1,47 @@
+version: 1
+skill: helin-analyze-livestream-commerce
+
+trigger_cases:
+  should_trigger:
+    - prompt: "附件是直播回放转写稿，拆解直播。"
+      reason: "含直播文稿和明确触发词"
+    - prompt: "请复盘这场直播的货盘、排品和主推品话术。"
+      reason: "目标与五模块核心能力一致"
+    - prompt: "分析一下这份直播话术，尤其看主推品怎么逼单。"
+      reason: "直播话术和逼单节奏分析"
+    - prompt: "这是一份直播ASR文稿，帮我还原返场动线。"
+      reason: "直播转写稿和排品动线还原"
+  should_not_trigger:
+    - prompt: "帮我写一套全新的直播带货脚本。"
+      reason: "没有现成文稿，目标是创作而非拆解"
+    - prompt: "分析这个直播间的千川投放ROI。"
+      reason: "明确属于付费流量分析"
+    - prompt: "根据GMV和在线人数做数据复盘。"
+      reason: "仅后台数据分析，没有直播文稿"
+    - prompt: "把这篇公众号文章总结一下。"
+      reason: "非直播电商场景"
+
+behavior_cases:
+  - id: synthetic_complete_with_timestamps
+    input_file: "fixtures/synthetic-beauty-transcript.md"
+    prompt: "品类是美妆护肤，时长约7分钟。拆解直播。"
+    expected_invariants:
+      - "报告严格包含模块一至模块五"
+      - "识别3个产品"
+      - "一次性洗脸巾判为福利品"
+      - "保湿精华判为主推品且只统计为一个产品、一次返场"
+      - "防晒乳判为次推品"
+      - "使用文稿原始时间戳，不标为估算时间点"
+      - "不声称实际提升了停留、转化或GMV"
+      - "不分析投流"
+      - "主推品话术去重但不新增卖点"
+
+failure_cases:
+  - prompt: "拆解直播。"
+    expected: "没有附件或文稿时，请用户上传或粘贴，不生成空报告"
+  - prompt: "附件只有主推品中间10分钟的节选，拆解直播。"
+    expected: "标明节选范围，不推断全场产品数和完整排品策略"
+  - prompt: "无时间戳文稿，拆解直播。"
+    expected: "按250字/分钟估算时间，并明确标注估算"
+  - prompt: "文稿里同一商品先说99元，后说129元。拆解直播。"
+    expected: "保留价格冲突并标明口径不一致，不擅自选择正确价格"

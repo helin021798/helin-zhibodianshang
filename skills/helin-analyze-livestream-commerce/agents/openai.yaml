@@ -1,0 +1,4 @@
+interface:
+  display_name: "河林直播电商拆解"
+  short_description: "从直播转写稿还原货盘、排品、逼单节奏与可复用话术框架"
+  default_prompt: "Use $helin-analyze-livestream-commerce to analyze the supplied livestream transcript and produce a five-module breakdown report."
