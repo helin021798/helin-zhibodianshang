@@ -2,7 +2,7 @@
 
 河林发布的直播电商拆解 Agent Skill。给它一份直播回放语音转写稿，再说“拆解直播”，即可按照固定五模块框架生成基于文稿证据的直播拆解报告。
 
-当前版本：`v0.1.0-candidate`。本地结构和脚本测试已通过，尚未发布到 GitHub。
+当前版本：`v0.1.0`。已发布于 `https://github.com/helin021798/helin-zhibodianshang`，本地结构、脚本测试和完整目录模拟安装均已通过。
 
 > **给 Agent 的安装入口：[`INSTALL.md`](INSTALL.md)**  
 > **Skill 完整目录：`skills/helin-analyze-livestream-commerce/`**  

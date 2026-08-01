@@ -4,7 +4,7 @@
 
 - 项目名称：helin-zhibodianshang
 - 建立日期：2026-08-01
-- 当前状态：v0.1.0 本地候选版，尚未发布到 GitHub
+- 当前状态：v0.1.0 公开测试版，发布地址 `https://github.com/helin021798/helin-zhibodianshang`
 - 产出用途：将河林提供的直播拆解提示词封装为可开源、可验证、可由 Agent 安装的 Skill
 
 ## 主要文件
