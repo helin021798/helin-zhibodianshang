@@ -1,4 +1,4 @@
 interface:
   display_name: "河林直播电商拆解"
-  short_description: "从直播转写稿还原货盘、排品、逼单节奏与可复用话术框架"
+  short_description: "以憋卡踢促为主框架，从直播转写稿还原货盘、排品、逼单循环与合规可复用话术，适配视频号/抖音/小红书"
   default_prompt: "Use $helin-analyze-livestream-commerce to analyze the supplied livestream transcript and produce a five-module breakdown report."
