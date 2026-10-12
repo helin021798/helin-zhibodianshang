@@ -64,18 +64,20 @@ helin-analyze-livestream-commerce/
 ├── agents/
 │   └── openai.yaml
 ├── references/
+│   ├── helin-method.md
 │   ├── analysis-rules.md
-│   └── report-template.md
+│   ├── report-template.md
+│   └── example-report.md
 └── scripts/
-    └── text_metrics.py
+    └── transcript_ledger.py
 ```
 
 检查以下条件：
 
 - `SKILL.md` 的frontmatter中存在 `name: helin-analyze-livestream-commerce`；
-- `SKILL.md` 能读取两个 `references/` 文件；
+- `SKILL.md` 能读取四个 `references/` 文件；
 - `agents/openai.yaml` 的默认提示词引用 `$helin-analyze-livestream-commerce`；
-- `scripts/text_metrics.py` 存在且没有在安装过程中被自动执行；
+- `scripts/transcript_ledger.py` 存在且没有在安装过程中被自动执行；
 - 所有文本文件保持UTF-8；
 - 安装目录之外没有被意外修改的文件。
 
