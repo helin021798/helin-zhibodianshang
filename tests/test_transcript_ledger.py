@@ -64,6 +64,27 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(fmt, "行首时间戳")
         self.assertEqual(segments[1].text, "最后三单了！续行。")
 
+    def test_time_mentions_in_plain_text_do_not_switch_format(self) -> None:
+        body = "家人们晚上好，今天给大家带来洗眼液，想要的扣1。\n\n" * 20
+        path = self.write(body + "明晚 8:00\n\n下一个蒸汽眼罩。\n\n周六 20:00\n\n明天见。\n")
+        segments, fmt = LEDGER.parse_transcript(path)
+        self.assertIn("无可靠时间戳", fmt)
+        self.assertEqual(sum(s.units for s in segments), LEDGER.count_units(body) + LEDGER.count_units("明晚8:00下一个蒸汽眼罩周六20:00明天见"))
+
+    def test_short_preamble_is_reported_not_counted(self) -> None:
+        path = self.write("# 标题\n2026年07月03日 20:41\n\n主播 00:00\n" + "欢迎" * 20 + "\n主播 01:00\n" + "上链接" * 20 + "\n")
+        segments, fmt = LEDGER.parse_transcript(path)
+        self.assertIn("首个时间戳前有", fmt)
+        self.assertEqual(segments[0].speaker, "主播")
+        self.assertTrue(segments[0].text.startswith("欢迎"))
+
+    def test_srt_subtitles(self) -> None:
+        path = self.write("1\n00:00:01,000 --> 00:00:03,000\n家人们晚上好\n\n2\n00:00:04,000 --> 00:00:09,000\n<i>只剩最后3单</i>\n")
+        segments, fmt = LEDGER.parse_transcript(path)
+        self.assertIn("SRT", fmt)
+        self.assertEqual(segments[0].ts, 1)
+        self.assertEqual(segments[0].text, "家人们晚上好只剩最后3单")
+
     def test_plain_text_splits_long_paragraphs(self) -> None:
         path = self.write("这是一句话。" * 200)
         segments, fmt = LEDGER.parse_transcript(path)
@@ -75,22 +96,41 @@ class ParseTests(unittest.TestCase):
 class TimelineTests(unittest.TestCase):
     def test_measured_rate_from_timestamps(self) -> None:
         segments, _ = LEDGER.parse_transcript(FIXTURE)
-        _, total, _, source = LEDGER.timeline(segments, None)
-        self.assertEqual(source, "原始时间戳实测")
-        self.assertGreater(total, 390)
+        tl = LEDGER.timeline(segments, None)
+        self.assertEqual(tl.source, "原始时间戳实测")
+        self.assertGreater(tl.total, 390)
 
     def test_user_duration_calibrates_rate(self) -> None:
         segments = [LEDGER.Segment("S001", "", None, "字" * 300), LEDGER.Segment("S002", "", None, "字" * 300)]
-        starts, total, rate, _ = LEDGER.timeline(segments, 2)
-        self.assertEqual(rate, 300)
-        self.assertEqual(starts[1], 60)
-        self.assertEqual(total, 120)
+        tl = LEDGER.timeline(segments, 2)
+        self.assertEqual(tl.rate, 300)
+        self.assertEqual(tl.starts[1], 60)
+        self.assertEqual(tl.total, 120)
 
     def test_default_rate_without_duration(self) -> None:
         segments = [LEDGER.Segment("S001", "", None, "字" * 250)]
-        _, _, rate, source = LEDGER.timeline(segments, None)
-        self.assertEqual(rate, 250)
-        self.assertIn("默认值", source)
+        tl = LEDGER.timeline(segments, None)
+        self.assertEqual(tl.rate, 250)
+        self.assertIn("默认值", tl.source)
+
+    def test_excerpt_not_starting_at_zero(self) -> None:
+        segments = [LEDGER.Segment("S001", "", 5400, "字" * 300), LEDGER.Segment("S002", "", 5460, "字" * 300)]
+        tl = LEDGER.timeline(segments, None)
+        self.assertEqual(tl.ends[1] - tl.starts[1], 60)
+        self.assertEqual(tl.total, 120)
+
+    def test_backward_timestamps_continue_timeline(self) -> None:
+        segments = [
+            LEDGER.Segment("S001", "", 0, "字" * 300),
+            LEDGER.Segment("S002", "", 60, "字" * 300),
+            LEDGER.Segment("S003", "", 0, "字" * 300),
+            LEDGER.Segment("S004", "", 60, "字" * 300),
+        ]
+        tl = LEDGER.timeline(segments, None)
+        self.assertEqual(tl.resets, [2])
+        self.assertEqual(tl.rate, 300)
+        self.assertTrue(all(b > a for a, b in zip(tl.starts, tl.starts[1:])))
+        self.assertEqual(tl.total, 240)
 
 
 class CommandTests(unittest.TestCase):
