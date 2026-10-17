@@ -1,0 +1,4 @@
+interface:
+  display_name: "河林直播策划大师"
+  short_description: "抖音/视频号/小红书 × 电商带货/知识付费线索的直播策划：流量、排品、玩法、话术、投流、私域、节奏与复盘"
+  default_prompt: "Use $helin-livestream-planning-master to plan the livestream for the supplied product, platform and goal."
