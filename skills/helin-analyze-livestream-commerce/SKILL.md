@@ -18,7 +18,7 @@ description: 河林直播电商拆解（河林方法论版）。分析中文直�
    - `references/analysis-rules.md`：证据等级、长文稿流程、角色判定、语速校准、合规标注；
    - `references/report-template.md`：五模块结构。写作前再看 `references/example-report.md` 对齐语气和证据密度。
 2. 确认输入：
-   - 有文本文稿（粘贴、md、txt）→ 直接开始；
+   - 有文本文稿（粘贴、md、txt、srt/vtt 字幕）→ 直接开始；
    - 只有 docx/pdf → 先用宿主可用的文档工具转成文本；
    - 只有视频文件或回放链接 → 探测宿主是否有转写类技能（如 `helin-douyin-transcript`）或转写工具，有则先转写；没有则停止，请用户上传文稿；
    - 什么都没有 → 停止分析，请用户上传或粘贴文稿。
@@ -111,4 +111,4 @@ python3 scripts/transcript_ledger.py ledger 文稿.md 边界.tsv
 
 任一检查不通过时，先修正报告再交付。
 
-版本 v2.0.0 ｜ 2026-10 ｜ 公开版（MIT）：憋卡踢促主框架、三平台适配、台账脚本、合规标注
+版本 v2.1.0 ｜ 2026-10 ｜ 开源版（MIT）：憋卡踢促主框架、三平台适配、台账脚本、合规标注
