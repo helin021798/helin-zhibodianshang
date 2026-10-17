@@ -17,6 +17,9 @@ BOUNDARIES 为 UTF-8 文本，每行一条，用 Tab 或至少两个空格分隔
 
 编号以 P 开头表示商品，以 N 开头表示非商品段（开场预告、抽奖、互动、下场预告等）。
 以 # 开头的行和空行忽略。
+
+支持的文稿格式：时间戳独占一行（可带说话人）、行首时间戳、SRT/VTT 字幕、无时间戳纯文本。
+时间戳回退（多段文稿拼接）时，回退处视为新片段接在上一段之后计算时长，显示和引用仍用原始时间戳。
 """
 
 from __future__ import annotations
@@ -26,12 +29,14 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 DEFAULT_RATE = 250.0
 MAX_PLAIN_SEGMENT_UNITS = 400
+SUBTITLE_MERGE_UNITS = 200
 
 UNIT_PATTERN = re.compile(
-    r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]|[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*"
+    r"[㐀-䶿一-鿿豈-﫿]|[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*"
 )
 TS = r"\d{1,2}:\d{2}(?::\d{2})?"
 # 「主播A 00:21」独占一行（飞书妙记、通义听悟等常见导出格式）
@@ -42,6 +47,8 @@ TS_ONLY_LINE = re.compile(rf"^\s*\[?(?P<ts>{TS})\]?(?:\s+(?P<spk>[^\d\s：:][^�
 INLINE_LINE = re.compile(
     rf"^\s*\[?(?P<ts>{TS})\]?\s*(?:(?P<spk>[^：:\s]{{1,20}})\s*[：:])?\s*(?P<text>.*)$"
 )
+# SRT/VTT 字幕时间轴「00:00:01,000 --> 00:00:03,000」
+CUE_LINE = re.compile(rf"^\s*(?P<ts>{TS})(?:[.,]\d{{1,3}})?\s*-->\s*\S+")
 SENTENCE_END = re.compile(r"(?<=[。！？!?；;…])")
 
 N = "[0-9一二两三四五六七八九十几]+"
@@ -67,6 +74,20 @@ class Segment:
 
     def __post_init__(self) -> None:
         self.units = count_units(self.text)
+
+
+@dataclass
+class Timeline:
+    starts: list[float]  # 连续时间轴上每段起点秒数，用于计算时长
+    ends: list[float]  # 连续时间轴上每段终点秒数
+    total: float  # 全场时长秒数
+    rate: float  # 语速，字/分钟
+    source: str  # 语速来源说明
+    resets: list[int]  # 时间戳回退的段下标（多段文稿拼接点）
+
+    @property
+    def measured(self) -> bool:
+        return self.source == "原始时间戳实测"
 
 
 def count_units(text: str) -> int:
@@ -112,34 +133,97 @@ def read_text(path: Path) -> str:
         raise ValueError(f"{path}: 需要 UTF-8 文本；docx/pdf 请先转成文本") from exc
 
 
+def preamble(lines: list[str]) -> str:
+    """首个时间戳之前的文字（忽略 # 标题行）。"""
+    return "".join(ln.strip() for ln in lines if ln.strip() and not ln.lstrip().startswith("#"))
+
+
+def layout_ok(lines: list[str], is_stamp: Callable[[str], bool]) -> bool:
+    """判断时间戳行是文稿结构，还是正文里偶然出现的「明晚 8:00」。
+
+    真实的带时间戳文稿里，时间戳行至少占非空行的一成，且首个时间戳之前的正文不超过全文两成。
+    """
+    first = next(i for i, ln in enumerate(lines) if is_stamp(ln))
+    hits = sum(1 for ln in lines if is_stamp(ln))
+    nonempty = sum(1 for ln in lines if ln.strip())
+    total = sum(count_units(ln) for ln in lines)
+    return hits * 10 >= nonempty and count_units(preamble(lines[:first])) <= total * 0.2
+
+
+def parse_subtitles(lines: list[str]) -> list[tuple[str, int | None, str]]:
+    """SRT/VTT：去掉序号行、时间轴和样式标签，相邻字幕合并到约 SUBTITLE_MERGE_UNITS 字一段。"""
+    cues: list[tuple[int, str]] = []
+    ts, buf = None, []
+    for i, ln in enumerate(lines):
+        m = CUE_LINE.match(ln)
+        if m:
+            if ts is not None and buf:
+                cues.append((ts, "".join(buf)))
+            ts, buf = parse_ts(m["ts"]), []
+            continue
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        if ln.strip().isdigit() and CUE_LINE.match(nxt):
+            continue
+        if ts is not None and ln.strip():
+            buf.append(re.sub(r"<[^>]+>", "", ln.strip()))
+    if ts is not None and buf:
+        cues.append((ts, "".join(buf)))
+
+    raw: list[tuple[str, int | None, str]] = []
+    cur_ts, cur = None, ""
+    for ts, text in cues:
+        if cur and count_units(cur + text) > SUBTITLE_MERGE_UNITS:
+            raw.append(("", cur_ts, cur))
+            cur = ""
+        if not cur:
+            cur_ts = ts
+        cur += text
+    if cur:
+        raw.append(("", cur_ts, cur))
+    return raw
+
+
 def parse_transcript(path: Path) -> tuple[list[Segment], str]:
     lines = read_text(path).splitlines()
+
     def header_match(ln: str) -> re.Match[str] | None:
         return HEADER_LINE.match(ln) or TS_ONLY_LINE.match(ln)
 
-    header_hits = sum(1 for ln in lines if header_match(ln))
-    inline_hits = sum(1 for ln in lines if re.match(rf"^\s*\[?{TS}\]?\s+\S", ln) and not TS_ONLY_LINE.match(ln))
-    raw: list[tuple[str, int | None, str]] = []
+    def inline_match(ln: str) -> bool:
+        return bool(re.match(rf"^\s*\[?{TS}\]?\s+\S", ln)) and not TS_ONLY_LINE.match(ln)
 
-    if header_hits >= 2 and header_hits >= inline_hits:
+    cue_hits = sum(1 for ln in lines if CUE_LINE.match(ln))
+    header_hits = sum(1 for ln in lines if header_match(ln))
+    inline_hits = sum(1 for ln in lines if inline_match(ln))
+    raw: list[tuple[str, int | None, str]] = []
+    lead = ""
+
+    if cue_hits >= 2:
+        fmt = "SRT/VTT 字幕（相邻字幕合并为段）"
+        raw = parse_subtitles(lines)
+    elif header_hits >= 2 and header_hits >= inline_hits and layout_ok(lines, lambda ln: bool(header_match(ln))):
         fmt = "时间戳独占一行（可带说话人）"
         spk, ts, buf = "", None, []
         started = False
-        for ln in lines:
+        for i, ln in enumerate(lines):
             m = header_match(ln)
             if m:
                 if started:
                     raw.append((spk, ts, "".join(buf)))
+                else:
+                    lead = preamble(lines[:i])
                 spk, ts, buf, started = (m["spk"] or "").strip(), parse_ts(m["ts"]), [], True
             elif started:
                 buf.append(ln.strip())
         if started:
             raw.append((spk, ts, "".join(buf)))
-    elif inline_hits >= 2:
+    elif inline_hits >= 2 and layout_ok(lines, inline_match):
         fmt = "行首时间戳"
-        for ln in lines:
+        for i, ln in enumerate(lines):
             m = INLINE_LINE.match(ln)
             if m and re.match(rf"^\s*\[?{TS}", ln):
+                if not raw:
+                    lead = preamble(lines[:i])
                 raw.append(((m["spk"] or "").strip(), parse_ts(m["ts"]), m["text"].strip()))
             elif ln.strip() and raw:
                 spk, ts, text = raw[-1]
@@ -152,6 +236,10 @@ def parse_transcript(path: Path) -> tuple[list[Segment], str]:
                 for chunk in split_long(para):
                     raw.append(("", None, chunk))
 
+    if lead:
+        # 首个时间戳之前多为标题、导出时间等元信息，不计入字数，但必须提示，避免正文被悄悄丢掉
+        fmt += f"；首个时间戳前有 {count_units(lead)} 字未计入（开头：{lead[:20]}），如是口播请补时间戳"
+
     segments = [Segment(f"S{i:03d}", spk, ts, text) for i, (spk, ts, text) in enumerate(raw, 1)]
     segments = [s for s in segments if s.units > 0]
     for i, seg in enumerate(segments, 1):
@@ -159,19 +247,27 @@ def parse_transcript(path: Path) -> tuple[list[Segment], str]:
     return segments, fmt
 
 
-def timeline(segments: list[Segment], duration_min: float | None) -> tuple[list[float], float, float, str]:
-    """返回每段起点秒数、全场时长秒数、语速（字/分钟）和语速来源说明。"""
+def timeline(segments: list[Segment], duration_min: float | None) -> Timeline:
+    """计算每段在连续时间轴上的起止、全场时长和语速。"""
     total_units = sum(s.units for s in segments)
-    stamped = [s for s in segments if s.ts is not None]
-    if stamped and len(stamped) == len(segments):
-        last = segments[-1]
-        # 时间戳跨度不含最后一段，先用前面各段算语速，再补最后一段时长
-        span_units = total_units - last.units
-        span = last.ts - segments[0].ts
+    if segments and all(s.ts is not None for s in segments):
+        # 用时间戳前进的相邻段算语速；回退处（拼接点）不计入
+        span, span_units = 0, 0
+        for a, b in zip(segments, segments[1:]):
+            if b.ts >= a.ts:
+                span += b.ts - a.ts
+                span_units += a.units
         rate = span_units / (span / 60) if span > 0 and span_units > 0 else DEFAULT_RATE
-        total = span + last.units / rate * 60
-        starts = [float(s.ts) for s in segments]
-        return starts, total, rate, "原始时间戳实测"
+        starts, resets = [float(segments[0].ts)], []
+        for i, (a, b) in enumerate(zip(segments, segments[1:]), 1):
+            if b.ts >= a.ts:
+                step = b.ts - a.ts
+            else:
+                step = a.units / rate * 60  # 回退前一段没有下一个时间戳，按语速估算
+                resets.append(i)
+            starts.append(starts[-1] + step)
+        ends = starts[1:] + [starts[-1] + segments[-1].units / rate * 60]
+        return Timeline(starts, ends, ends[-1] - starts[0], rate, "原始时间戳实测", resets)
     if duration_min:
         rate = total_units / duration_min
         source = f"用户提供总时长 {duration_min:g} 分钟校准"
@@ -182,7 +278,22 @@ def timeline(segments: list[Segment], duration_min: float | None) -> tuple[list[
     for s in segments:
         starts.append(acc / rate * 60)
         acc += s.units
-    return starts, total_units / rate * 60, rate, source
+    total = total_units / rate * 60
+    return Timeline(starts, starts[1:] + [total], total, rate, source, [])
+
+
+def clock(segments: list[Segment], tl: Timeline, i: int, end: bool = False) -> str:
+    """显示用时间：有原始时间戳时用原始时间戳（便于回查），否则用估算时间。"""
+    if tl.measured:
+        seg = segments[i]
+        return fmt_ts(seg.ts + (tl.ends[i] - tl.starts[i]) if end else seg.ts)
+    return "≈" + fmt_ts(tl.ends[i] if end else tl.starts[i])
+
+
+def reset_note(segments: list[Segment], tl: Timeline) -> str:
+    sids = "、".join(segments[i].sid for i in tl.resets[:5]) + ("等" if len(tl.resets) > 5 else "")
+    return (f"时间戳回退 {len(tl.resets)} 处（{sids}），文稿可能由多段拼接；"
+            "回退处已接在上一段之后计算时长，回退前一段的时长按语速估算")
 
 
 def cmd_outline(args: argparse.Namespace) -> int:
@@ -190,38 +301,38 @@ def cmd_outline(args: argparse.Namespace) -> int:
     if not segments:
         print("error: 未解析到任何有效文字", file=sys.stderr)
         return 2
-    starts, total, rate, source = timeline(segments, args.duration_min)
+    tl = timeline(segments, args.duration_min)
     total_units = sum(s.units for s in segments)
     speakers: dict[str, int] = {}
     for s in segments:
         speakers[s.speaker or "（未标注）"] = speakers.get(s.speaker or "（未标注）", 0) + s.units
-    backward = sum(1 for a, b in zip(segments, segments[1:]) if a.ts is not None and b.ts is not None and b.ts < a.ts)
 
     print(f"# 文稿概况：{args.file.name}")
     print(f"- 格式：{fmt}；分段 {len(segments)} 段；有效字数 {total_units}")
-    est = "" if source == "原始时间戳实测" else "（估算）"
-    minutes = f"约 {total / 60:.0f} 分钟" if total >= 60 else "<1 分钟"
-    print(f"- 时长：{minutes}{est}；语速 {rate:.0f} 字/分钟（{source}）")
-    if backward:
-        print(f"- 警告：时间戳回退 {backward} 处，文稿可能由多段拼接，跨段时长不可直接相减")
+    est = "" if tl.measured else "（估算）"
+    minutes = f"约 {tl.total / 60:.0f} 分钟" if tl.total >= 60 else "<1 分钟"
+    print(f"- 时长：{minutes}{est}；语速 {tl.rate:.0f} 字/分钟（{tl.source}）")
+    if tl.resets:
+        print(f"- 警告：{reset_note(segments, tl)}")
     print("- 说话人字数：" + "；".join(f"{k} {v}" for k, v in sorted(speakers.items(), key=lambda kv: -kv[1])))
     print()
-    tag = "" if source == "原始时间戳实测" else "≈"
-    for seg, st in zip(segments, starts):
+    for i, seg in enumerate(segments):
         preview = re.sub(r"\s+", "", seg.text)[: args.preview]
         spk = f" | {seg.speaker}" if seg.speaker else ""
-        print(f"{seg.sid} | {tag}{fmt_ts(st)}{spk} | {seg.units}字 | {preview}")
+        print(f"{seg.sid} | {clock(segments, tl, i)}{spk} | {seg.units}字 | {preview}")
     return 0
 
 
 def cmd_signals(args: argparse.Namespace) -> int:
     segments, _ = parse_transcript(args.file)
-    starts, _, _, source = timeline(segments, args.duration_min)
-    tag = "" if source == "原始时间戳实测" else "≈"
+    if not segments:
+        print("error: 未解析到任何有效文字", file=sys.stderr)
+        return 2
+    tl = timeline(segments, args.duration_min)
     wanted = args.only.split(",") if args.only else list(SIGNALS)
     print("# 信号线索（关键词命中≠动作成立，必须回到原文确认）")
     print("段号 | 时间 | 命中（类别:词×次）")
-    for seg, st in zip(segments, starts):
+    for i, seg in enumerate(segments):
         hits = []
         for cat in wanted:
             pattern = SIGNALS.get(cat)
@@ -233,7 +344,7 @@ def cmd_signals(args: argparse.Namespace) -> int:
             if found:
                 hits.append(cat + ":" + "、".join(k if v == 1 else f"{k}×{v}" for k, v in found.items()))
         if hits:
-            print(f"{seg.sid} | {tag}{fmt_ts(st)} | " + "  ".join(hits))
+            print(f"{seg.sid} | {clock(segments, tl, i)} | " + "  ".join(hits))
     return 0
 
 
@@ -256,14 +367,17 @@ def parse_boundaries(path: Path, valid: dict[str, int]) -> list[tuple[str, str, 
 
 def cmd_ledger(args: argparse.Namespace) -> int:
     segments, _ = parse_transcript(args.file)
-    starts, total, rate, source = timeline(segments, args.duration_min)
+    if not segments:
+        print("error: 未解析到任何有效文字", file=sys.stderr)
+        return 2
+    tl = timeline(segments, args.duration_min)
     index = {s.sid: i for i, s in enumerate(segments)}
     rows = parse_boundaries(args.boundaries, index)
-    ends = starts[1:] + [total]
-    measured = source == "原始时间戳实测"
-    tag = "原始时间戳" if measured else "估算"
+    tag = "原始时间戳" if tl.measured else "估算"
 
-    print(f"# 出场台账（时间口径：{tag}；语速 {rate:.0f} 字/分钟，{source}）")
+    print(f"# 出场台账（时间口径：{tag}；语速 {tl.rate:.0f} 字/分钟，{tl.source}）")
+    if tl.resets:
+        print(f"\n> 警告：{reset_note(segments, tl)}。跨拼接点的出场，起止时间分属两段文稿。")
     print()
     print("| 出场编号 | 名称 | 起止段 | 起止时间 | 时长(分) | 字数 |")
     print("|---|---|---|---|---:|---:|")
@@ -274,31 +388,31 @@ def cmd_ledger(args: argparse.Namespace) -> int:
         seen[pid] = seen.get(pid, 0) + 1
         label = pid if seen[pid] == 1 else f"{pid}·R{seen[pid]}"
         units = sum(s.units for s in segments[a : b + 1])
-        minutes = (ends[b] - starts[a]) / 60
+        minutes = (tl.ends[b] - tl.starts[a]) / 60
         for i in range(a, b + 1):
             covered[i] += 1
         t = totals.setdefault(pid, {"name": name, "count": 0, "units": 0, "min": 0.0})
         t["count"] += 1
         t["units"] += units
         t["min"] += minutes
-        prefix = "" if measured else "约"
-        print(f"| {label} | {name} | {segments[a].sid}–{segments[b].sid} | "
-              f"{prefix}{fmt_ts(starts[a])}–{fmt_ts(ends[b])} | {minutes:.1f} | {units} |")
+        spans_reset = any(a < r <= b for r in tl.resets)
+        when = f"{clock(segments, tl, a)}–{clock(segments, tl, b, end=True)}" + ("（跨拼接点）" if spans_reset else "")
+        print(f"| {label} | {name} | {segments[a].sid}–{segments[b].sid} | {when} | {minutes:.1f} | {units} |")
 
     print()
     print("| 编号 | 名称 | 出场次数 | 累计时长(分) | 占全场 | 累计字数 |")
     print("|---|---|---:|---:|---:|---:|")
     for pid, t in sorted(totals.items(), key=lambda kv: -kv[1]["min"]):
-        share = t["min"] * 60 / total * 100 if total else 0
+        share = t["min"] * 60 / tl.total * 100 if tl.total else 0
         print(f"| {pid} | {t['name']} | {int(t['count'])} | {t['min']:.1f} | {share:.0f}% | {int(t['units'])} |")
 
     prod = [t for pid, t in totals.items() if pid.upper().startswith("P")]
     non = [t for pid, t in totals.items() if not pid.upper().startswith("P")]
     print()
-    print(f"- 全场：{total / 60:.1f} 分钟，{sum(s.units for s in segments)} 字")
+    print(f"- 全场：{tl.total / 60:.1f} 分钟，{sum(s.units for s in segments)} 字")
     print(f"- 商品段合计：{len(prod)} 个商品，{sum(t['min'] for t in prod):.1f} 分钟，{int(sum(t['units'] for t in prod))} 字")
     print(f"- 非商品段合计：{len(non)} 类，{sum(t['min'] for t in non):.1f} 分钟，{int(sum(t['units'] for t in non))} 字")
-    if measured:
+    if tl.measured:
         print(f"- 注：末段 {segments[-1].sid} 没有下一个时间戳，其结束时间按实测语速估算")
 
     gaps, overlaps = [], []
