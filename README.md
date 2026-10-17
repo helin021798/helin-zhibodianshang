@@ -1,30 +1,31 @@
 # helin-zhibodianshang
 
-河林发布的直播电商拆解 Agent Skill。给它一份直播回放语音转写稿，再说“拆解直播”，即可以“憋单—卡单—踢单—促单”循环为主框架，生成基于文稿证据的五模块直播拆解报告，适配视频号、抖音、小红书。
+河林发布的两个直播电商 Agent Skill，完整版开源，共用“憋单—卡单—踢单—促单”这套术语：
 
-当前版本：`v2.0.0`（更新记录见 [`CHANGELOG.md`](CHANGELOG.md)）。已发布于 `https://github.com/helin021798/helin-zhibodianshang`，结构校验、12 项脚本测试和一份 2.5 小时真实视频号文稿的前向测试均已通过。
+| Skill | 做什么 | 一句话触发 |
+|---|---|---|
+| `helin-analyze-livestream-commerce` 直播拆解 | 给一份直播回放转写稿，生成基于文稿证据的五模块拆解报告 | “拆解直播” |
+| `helin-livestream-planning-master` 直播策划大师 | 给产品资料和经营目标，输出整场直播策划或单模块方案 | “做直播策划” |
 
-> 本仓库是**公开版**，收录精简版河林方法论。四段节奏参照、节奏判断解读与完整案例拆解属于河林付费完整版内容。
+两者可以串起来用：先拆对标直播间或上一场回放，再把拆解报告交给策划 skill 做下一场。
+
+当前版本：`v2.1.0`（更新记录见 [`CHANGELOG.md`](CHANGELOG.md)）。已发布于 `https://github.com/helin021798/helin-zhibodianshang`。
 
 > **给 Agent 的安装入口：[`INSTALL.md`](INSTALL.md)**  
-> **Skill 完整目录：`skills/helin-analyze-livestream-commerce/`**  
+> **Skill 目录：`skills/helin-analyze-livestream-commerce/`、`skills/helin-livestream-planning-master/`**  
 > **Skill 详细说明：[`SKILL_DETAILS.md`](SKILL_DETAILS.md)**
 
 ## 给读者的一句话
 
-仓库发布后，推荐把下面这句话直接发给自己的 Agent：
+推荐把下面这句话直接发给自己的 Agent：
 
 ```text
-帮我安装 GitHub 仓库 https://github.com/helin021798/helin-zhibodianshang 中的 helin-analyze-livestream-commerce Skill。请先读取仓库根目录 INSTALL.md，安装完整 Skill 目录，不要只下载 SKILL.md；安装完成后按 INSTALL.md 的清单验证，并告诉我是否需要重启或开启新对话。
+帮我安装 GitHub 仓库 https://github.com/helin021798/helin-zhibodianshang 中的两个 Skill：helin-analyze-livestream-commerce 和 helin-livestream-planning-master。请先读取仓库根目录 INSTALL.md，安装完整 Skill 目录，不要只下载 SKILL.md；安装完成后按 INSTALL.md 的清单验证，并告诉我是否需要重启或开启新对话。
 ```
 
-简短版也可以这样说：
+只装其中一个时，把句子里的另一个 Skill 名删掉即可。
 
-```text
-帮我安装 GitHub 上 helin021798/helin-zhibodianshang 仓库里的 helin-analyze-livestream-commerce Skill。
-```
-
-## 它能做什么
+## 直播拆解：它能做什么
 
 - 用台账脚本把长文稿切段、计量，自动校准语速，统计每个商品的出场、返场和累计时长；
 - 识别全场商品、价格机制、核心卖点，用 A–F 六项信号综合判定货盘角色；
@@ -37,7 +38,18 @@
 
 它不分析投流、付费流量、ROI或广告策略，也不会从直播话术反推真实销量、在线人数和GMV。
 
-## 最简使用方法
+## 直播策划：它能做什么
+
+- 覆盖抖音、视频号、小红书三个平台 × 电商带货、知识付费/线索获客两种业态；
+- 七模块工作流：流量获取、直播排品、营销玩法、塑品话术、投流策略（只到策划层）、私域联动、节奏与分工；
+- 四种模式：整场策划、单模块速出、诊断救场（“直播间没人/不转化”）、根据上一场数据复盘校准；
+- 写方案前先做可行性判断，用 `live_calc.py` 算保本 ROI、坑产缺口和机制让利；
+- 每个关键数字和规则都标来源：〔河林方法〕〔行业经验·年月〕〔推断〕〔待确认〕；
+- 内置合规红线：稀缺话术、价格对比、功效宣称、站外导流、教培资质都有替换写法。
+
+它不承诺在线人数、GMV、ROI 或平台推荐结果，也不做投流账户搭建。
+
+## 直播拆解：最简使用方法
 
 提供：
 
@@ -53,7 +65,15 @@
 拆解直播。
 ```
 
-## 固定报告结构
+策划 skill 的用法：
+
+```text
+请使用 $helin-livestream-planning-master。
+视频号护肤品牌官号，周年专场 3 小时，目标 GMV 18 万，产品清单和毛利见附件。
+帮我做直播策划。
+```
+
+## 拆解报告的固定结构
 
 1. 直播货盘总览；
 2. 排品策略与节奏拆解；
@@ -80,15 +100,27 @@ helin-zhibodianshang/
 ├── SKILL_DETAILS.md
 ├── LICENSE
 ├── skills/
-│   └── helin-analyze-livestream-commerce/
+│   ├── helin-analyze-livestream-commerce/
+│   │   ├── SKILL.md
+│   │   ├── agents/openai.yaml
+│   │   ├── references/
+│   │   │   ├── helin-method.md
+│   │   │   ├── analysis-rules.md
+│   │   │   ├── report-template.md
+│   │   │   └── example-report.md
+│   │   └── scripts/transcript_ledger.py
+│   └── helin-livestream-planning-master/
 │       ├── SKILL.md
 │       ├── agents/openai.yaml
 │       ├── references/
 │       │   ├── helin-method.md
-│       │   ├── analysis-rules.md
-│       │   ├── report-template.md
-│       │   └── example-report.md
-│       └── scripts/transcript_ledger.py
+│       │   ├── platform-channels.md / platform-douyin.md / platform-xhs.md
+│       │   ├── model-knowledge-leads.md
+│       │   ├── playbook-merch.md / playbook-scripts.md / playbook-traffic-ads.md
+│       │   ├── playbook-private.md / playbook-ops-review.md
+│       │   ├── compliance.md
+│       │   └── example-plan.md
+│       └── scripts/live_calc.py
 ├── CHANGELOG.md
 ├── evals/
 └── tests/
@@ -100,6 +132,7 @@ helin-zhibodianshang/
 
 ```powershell
 skills-ref validate .\skills\helin-analyze-livestream-commerce
+skills-ref validate .\skills\helin-livestream-planning-master
 ```
 
 运行脚本测试：
@@ -118,9 +151,21 @@ python .\skills\helin-analyze-livestream-commerce\scripts\transcript_ledger.py l
 
 无时间戳文稿可在子命令前加 `--duration-min 实际分钟数` 校准语速。
 
+策划测算（百分比参数一律写百分数，30 表示 30%，1 表示 1%）：
+
+```powershell
+python .\skills\helin-livestream-planning-master\scripts\live_calc.py roi --margin 60 --sign-rate 85 --fee 5 --target-net 10
+python .\skills\helin-livestream-planning-master\scripts\live_calc.py pit --items "主推A:299:300,福利B:39.9:800" --target 200000
+python .\skills\helin-livestream-planning-master\scripts\live_calc.py mech --items "赠品小样:12:500,免单抽奖:299:3" --gmv 200000 --margin 40
+```
+
 ## 隐私与安全
 
 真实直播文稿可能包含主播、品牌、客户和消费者信息。提交 Issue、Pull Request 或测试样本前请先匿名化；不要提交账号密码、Cookie、API Key、订单数据、用户个人信息或未经授权的客户资料。
+
+## 内容来源与使用边界
+
+两个 Skill 的方法论由河林本人的专栏、文章、分享和操盘经验提炼；平台文件中的行业经验为转述提炼，均标注原资料时间。平台规则变化很快，引用时以平台现行规则为准；合规提示是风险提醒，不是法律意见。案例均已匿名。
 
 ## 许可证
 
